@@ -3,7 +3,7 @@ A physics-based interactive (cellular-automata + OOPS) particle system!
 
 ## SETUP
 Run the code for the given files in p5.js web editor, or directly visit these links:
-1. **SandSim CA (non-rotable)** https://editor.p5js.org/urvashicodes/sketches/oXPAP6CrC
+1. **SandSim Stationary** https://editor.p5js.org/urvashicodes/sketches/oXPAP6CrC
 2. **SandSim Rotatable** https://editor.p5js.org/urvashicodes/sketches/h2R2wqaoW
 
 ## ABOUT THIS CODE: THE CHALLENGE
