@@ -1,0 +1,388 @@
+/*
+      This sand is designed to react to the sandbox rotations!
+      
+      You'll find interactive sliders just below the canvas.
+      
+      You'll notice the sand's behaviour logic is slightly different here compared to the original stationary version. I've drawn on ideas from fluid simulations in this, allowing this program to render the sand falling in a far more realistic and satisfying way!
+
+*/
+
+// global vars
+let bgColor = "rgb(0,0,0)";    // scene background
+
+// simulation params
+const w = 5;                   // size of each grid cell
+const gravityMagnitude = 0.16; // gravity strength per frame
+
+// rotation angles (in radians)
+let rotX = 0;
+let rotY = 0;
+let rotZ = 0;
+
+const neighborOffsets = (() => {
+  // precompute (dx,dy,dz) pairs for diffusion
+  const offs = [];
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dz = -1; dz <= 1; dz++) {
+        // Skip the center position
+        if (dx !== 0 || dy !== 0 || dz !== 0) {
+          offs.push([dx, dy, dz]);
+        }
+      }
+    }
+  }
+  return offs;
+})();
+
+// user input
+let xSlider, ySlider, zSlider; // sliders for (x,y,z) emitter pos
+let rotXSlider, rotYSlider, rotZSlider; // sliders for rotation angles
+let sendButton;
+let buttonPressed = false;     // is user drawing sand?
+
+// timing (pause when no input)
+let lastEmitTime = 0;
+const pauseTimeout = 10000;    // ms until simulation pauses
+
+// grid dims & storage
+let cols, rows, depths;        
+let grid, nextGrid;            // double-buffer arrays
+
+// active particles list: {i,j,k,cell}
+let activeParticles = [];
+
+class Cell {
+  constructor() {
+    this.reset();              // initialise default state
+  }
+  
+  reset() {
+    // empty cell state
+    this.cellColor = bgColor;
+    this.velocityX = 0;
+    this.velocityY = 0;
+    this.velocityZ = 0;
+    this.active = false;
+  }
+  
+  copyTo(dest) {
+    // copy this state into dest cell & activate
+    dest.cellColor = this.cellColor;
+    dest.velocityX = this.velocityX;
+    dest.velocityY = this.velocityY;
+    dest.velocityZ = this.velocityZ;
+    dest.active = true;
+  }
+}
+
+// create 3D array of Cells
+function make3D(c, r, d) {
+  const arr = new Array(c);
+  for (let i = 0; i < c; i++) {
+    arr[i] = new Array(r);
+    for (let j = 0; j < r; j++) {
+      arr[i][j] = new Array(d);
+      for (let k = 0; k < d; k++) {
+        arr[i][j][k] = new Cell();
+      }
+    }
+  }
+  return arr;
+}
+
+function setup() {
+  frameRate(60);
+  const canvasSize = 500;
+  createCanvas(canvasSize, canvasSize, WEBGL);
+
+  // compute grid dimensions
+  cols = rows = depths = canvasSize / w;
+  grid = make3D(cols, rows, depths);
+  nextGrid = make3D(cols, rows, depths);
+
+  // sliders for X, Y, Z emitter position
+  createP("Emitter Position:");
+  ["X","Y","Z"].forEach((axis, idx) => {
+    createP(`${axis} (0 to ${canvasSize})`);
+    const s = createSlider(0, canvasSize, canvasSize/2);
+    if (idx === 0) xSlider = s;
+    if (idx === 1) ySlider = s;
+    if (idx === 2) zSlider = s;
+  });
+
+  // sliders for rotation angles
+  createP("Box Rotation (radians):");
+  ["X","Y","Z"].forEach((axis, idx) => {
+    createP(`Rotate ${axis} (-π to π)`);
+    const s = createSlider(-PI, PI, 0, 0.01); // starting at 0 (no rotation)
+    if (idx === 0) rotXSlider = s;
+    if (idx === 1) rotYSlider = s;
+    if (idx === 2) rotZSlider = s;
+  });
+
+  sendButton = createButton("Send Sand");
+  sendButton.mousePressed(() => {
+    buttonPressed = true;
+    lastEmitTime = millis();    // reset timeout on press
+  });
+  sendButton.mouseReleased(() => {
+    buttonPressed = false;
+  });
+}
+
+function draw() {
+  background(bgColor);
+  translate(0, 0, -700);  // move entire scene 700 units away from the camera
+
+
+  // Update rotation values from sliders
+  rotX = rotXSlider.value();
+  rotY = rotYSlider.value();
+  rotZ = rotZSlider.value();
+
+  // DRAW WIREFRAME BOX WITH ROTATION
+  push();
+    rotateX(rotX);
+    rotateY(rotY);
+    rotateZ(rotZ);
+    noFill();
+    stroke(255);
+    strokeWeight(3);
+    box(cols*w, rows*w, depths*w);
+  pop();
+
+  // emit sand while button is held
+  if (buttonPressed) {
+    emitSand();
+    lastEmitTime = millis();    // keep sim active
+  }
+
+  // Calculate gravity vector based on rotation
+  // Default gravity is (0, 1, 0) pointing down along y-axis
+  let gravityVector = calculateGravityVector(rotX, rotY, rotZ);
+
+  // render all active particles
+  push();
+    rotateX(rotX);
+    rotateY(rotY);
+    rotateZ(rotZ);
+    
+    for (let p of activeParticles) {
+      noStroke();
+      fill(p.cell.cellColor);
+      push();
+        translate(
+          (p.i - cols/2) * w,
+          (p.j - rows/2) * w,
+          (p.k - depths/2) * w
+        );
+        box(w);                    // < particle shape >
+      pop();
+    }
+  pop();
+
+  // Always update physics when there are active particles
+  if (activeParticles.length > 0) {
+    // reset nextGrid cells at active positions
+    for (let p of activeParticles) {
+      nextGrid[p.i][p.j][p.k].reset();
+    }
+    const newActives = [];
+
+    // PHYSICS UPDATE
+    for (let p of activeParticles) {
+      const {i, j, k, cell} = p;
+      
+      // Apply acceleration from gravity - ensure consistent piling behavior
+      // Apply a minimum gravity value to ensure particles always move, even with zero rotation
+      cell.velocityX += gravityVector.x;
+      cell.velocityY += gravityVector.y; 
+      cell.velocityZ += gravityVector.z;
+      
+      // Calculate new position based on velocity
+      let newPos = {
+        x: i + cell.velocityX,
+        y: j + cell.velocityY,
+        z: k + cell.velocityZ
+      };
+      
+      // Round to get grid indices
+      let targetI = floor(newPos.x);
+      let targetJ = floor(newPos.y);
+      let targetK = floor(newPos.z);
+      
+      // Ensure we stay within grid bounds
+      targetI = constrain(targetI, 0, cols-1);
+      targetJ = constrain(targetJ, 0, rows-1);
+      targetK = constrain(targetK, 0, depths-1);
+      
+      let moved = false;
+      
+      // If the target cell is free, move there
+      if (!nextGrid[targetI][targetJ][targetK].active) {
+        cell.copyTo(nextGrid[targetI][targetJ][targetK]);
+        newActives.push({i: targetI, j: targetJ, k: targetK, cell: nextGrid[targetI][targetJ][targetK]});
+        moved = true;
+      } else {
+        // Target is occupied, try neighbors based on movement direction
+        // Sort neighbors by proximity to movement direction
+        const sortedNeighbors = [...neighborOffsets];
+        sortedNeighbors.sort((a, b) => {
+          const dotA = a[0] * gravityVector.x + a[1] * gravityVector.y + a[2] * gravityVector.z;
+          const dotB = b[0] * gravityVector.x + b[1] * gravityVector.y + b[2] * gravityVector.z;
+          return dotB - dotA; // Higher dot product means more aligned with gravity
+        });
+        
+        // Try neighbors in sorted order
+        for (const [dx, dy, dz] of sortedNeighbors) {
+          const ni = i + dx;
+          const nj = j + dy;
+          const nk = k + dz;
+          
+          if (ni >= 0 && ni < cols && 
+              nj >= 0 && nj < rows && 
+              nk >= 0 && nk < depths &&
+              !nextGrid[ni][nj][nk].active) {
+            // Only allow movement if it's somewhat aligned with gravity or if we're in contact with other particles
+            const dotProduct = dx * gravityVector.x + dy * gravityVector.y + dz * gravityVector.z;
+            // Negative dot product means movement is aligned with gravity (since gravity points "downward")
+            if (dotProduct < 0 || checkNeighborContact(grid, i, j, k)) {
+            
+            cell.copyTo(nextGrid[ni][nj][nk]);
+            // Dampen velocity when bouncing or sliding
+            nextGrid[ni][nj][nk].velocityX = cell.velocityX * 0.8;
+            nextGrid[ni][nj][nk].velocityY = cell.velocityY * 0.8;
+            nextGrid[ni][nj][nk].velocityZ = cell.velocityZ * 0.8;
+            newActives.push({i: ni, j: nj, k: nk, cell: nextGrid[ni][nj][nk]});
+            moved = true;
+            break;
+            }
+          
+          }
+        }
+      }
+
+      // If still can't move, stay in place
+      if (!moved) {
+        cell.copyTo(nextGrid[i][j][k]);
+        // Stop movement when blocked
+        nextGrid[i][j][k].velocityX *= 0.5;
+        nextGrid[i][j][k].velocityY *= 0.5;
+        nextGrid[i][j][k].velocityZ *= 0.5;
+        newActives.push({i, j, k, cell: nextGrid[i][j][k]});
+      }
+    }
+
+    // swap buffers & update active list
+    [grid, nextGrid] = [nextGrid, grid];
+    activeParticles = newActives;
+  }
+}
+
+// Calculate gravity vector based on current rotation
+// Check if a cell has neighboring particles (to allow side movement when in contact)
+function checkNeighborContact(grid, i, j, k) {
+  // Check the 26 adjacent cells for active particles
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dz = -1; dz <= 1; dz++) {
+        // Skip center position (the cell itself)
+        if (dx === 0 && dy === 0 && dz === 0) continue;
+        
+        const ni = i + dx;
+        const nj = j + dy;
+        const nk = k + dz;
+        
+        // Check if in bounds and has an active particle
+        if (ni >= 0 && ni < cols && 
+            nj >= 0 && nj < rows && 
+            nk >= 0 && nk < depths) {
+          if (grid[ni][nj][nk].active) {
+            return true; // Found a neighboring particle
+          }
+        }
+      }
+    }
+  }
+  return false; // No neighbors found
+}
+
+function calculateGravityVector(angleX, angleY, angleZ) {
+  // Start with gravity pointing down along y-axis (0,1,0)
+  let gravityX = 0;
+  let gravityY = gravityMagnitude;
+  let gravityZ = 0;
+  
+  // Apply rotation matrix to gravity vector
+  // Rotate around X
+  let tempY = gravityY * cos(angleX) - gravityZ * sin(angleX);
+  let tempZ = gravityY * sin(angleX) + gravityZ * cos(angleX);
+  gravityY = tempY;
+  gravityZ = tempZ;
+  
+  // Rotate around Y
+  let tempX = gravityX * cos(angleY) + gravityZ * sin(angleY);
+  tempZ = -gravityX * sin(angleY) + gravityZ * cos(angleY);
+  gravityX = tempX;
+  gravityZ = tempZ;
+  
+  // Rotate around Z
+  tempX = gravityX * cos(angleZ) - gravityY * sin(angleZ);
+  tempY = gravityX * sin(angleZ) + gravityY * cos(angleZ);
+  gravityX = tempX;
+  gravityY = tempY;
+  
+  return {x: gravityX, y: gravityY, z: gravityZ};
+}
+
+// create new sand particles around slider position
+function emitSand() {
+  const ci = floor(xSlider.value() / w); // along i
+  const cj = floor(ySlider.value() / w); // along j
+  const ck = floor(zSlider.value() / w); // along k
+  const ext = floor(5 / 2); // extent (added on either side of the particle)
+
+  for (let di = -ext; di <= ext; di++) {
+    for (let dj = -ext; dj <= ext; dj++) {
+      for (let dk = -ext; dk <= ext; dk++) {
+        if (random() < 0.5) { // 50% chance on either side
+          const ni = ci + di, nj = cj + dj, nk = ck + dk;
+          if (
+            ni >= 0 && ni < cols &&
+            nj >= 0 && nj < rows &&
+            nk >= 0 && nk < depths
+          ) {
+            const c = grid[ni][nj][nk];
+            if (!c.active) {
+              // activate new sand particle
+              c.active = true;
+              // randomising colour
+              function getRandomColorBetween(color1, color2) {
+              const random = Math.random();
+              return {
+        red: Math.floor(color1.red + (color2.red - color1.red) * random),
+        green: Math.floor(color1.green + (color2.green - color1.green) * random),
+        blue: Math.floor(color1.blue + (color2.blue - color1.blue) * random)
+      };
+    }
+
+    // Example usage
+    const color1 = { red: 210, green: 160, blue: 80 }; // dark brown
+    const color2 = { red: 240, green: 220, blue: 180 }; // light brown
+              
+      let randomColor = getRandomColorBetween(color1, color2);
+      // linearly interpolate between dark brown and light brown
+
+              c.cellColor = color(randomColor.red, randomColor.green, randomColor.blue);
+              c.velocityX = 0;
+              c.velocityY = 0;
+              c.velocityZ = 0;
+              activeParticles.push({i: ni, j: nj, k: nk, cell: c});
+            }
+          }
+        }
+      }
+    }
+  }
+}
