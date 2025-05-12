@@ -2,8 +2,7 @@
 Physics-based interactive CA particle system. 
 
 ## SETUP
-_Run the code for the given files in p5.js web editor, or directly visit these links:
-_
+Run the code for the given files in p5.js web editor, or directly visit these links:
 **SandSim CA (non-rotable)** https://editor.p5js.org/urvashicodes/sketches/oXPAP6CrC
 **SandSim Rotatable** https://editor.p5js.org/urvashicodes/sketches/h2R2wqaoW
 
