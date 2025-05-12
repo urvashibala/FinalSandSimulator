@@ -3,8 +3,8 @@ Physics-based interactive CA particle system.
 
 ## SETUP
 Run the code for the given files in p5.js web editor, or directly visit these links:
-**SandSim CA (non-rotable)** https://editor.p5js.org/urvashicodes/sketches/oXPAP6CrC
-**SandSim Rotatable** https://editor.p5js.org/urvashicodes/sketches/h2R2wqaoW
+1. **SandSim CA (non-rotable)** https://editor.p5js.org/urvashicodes/sketches/oXPAP6CrC
+2. **SandSim Rotatable** https://editor.p5js.org/urvashicodes/sketches/h2R2wqaoW
 
 ## ABOUT THIS CODE: THE CHALLENGE
 1. Sand usually slows down as more particles are created, because of the need for more collision checks and object-handling. At thousands of particles, the system inevitaly slows down. Challenging myself to optimise the program so it draws fast even with many particles.
