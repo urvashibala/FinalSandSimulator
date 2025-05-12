@@ -1,3 +1,13 @@
+/*
+Creates realistic, efficient (quickly created) sand particles!
+
+Use sliders to determine the point at which you want to emit sand.
+Then press the button to emit sand from there! You can also press and hold to create a continuous stream of emitted sand at that point.
+
+This is the non-rotatable version (orbit control with your mouse just to zoom in and out). Refer to other version for rotation!
+
+*/
+
 // FINAL CODE!
 // global vars
 let bgColor = "rgb(0,0,0)";    // scene background
