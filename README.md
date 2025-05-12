@@ -1,5 +1,5 @@
 # FinalSandSimulator
-A physics-based interactive cellular-automata particle system!
+A physics-based interactive (cellular-automata + OOPS) particle system!
 
 ## SETUP
 Run the code for the given files in p5.js web editor, or directly visit these links:
