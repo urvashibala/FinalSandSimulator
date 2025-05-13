@@ -1,20 +1,23 @@
 /*
-Creates realistic, efficient (quickly created) sand particles!
-
-Use sliders to determine the point at which you want to emit sand.
-Then press the button to emit sand from there! You can also press and hold to create a continuous stream of emitted sand at that point.
-
-This is the non-rotatable version (orbit control with your mouse just to zoom in and out). Refer to other version for rotation!
-
+    Use the sliders to decide where you'd like to emit sand from.
+    Then click "Draw Sand" to begin emitting from your chosen location!
+    You can press and hold the button to create a continuous stream of sand.
+    
+    You can use the mouse or trackpad to rotate the 
 */
 
 // FINAL CODE!
 // global vars
-let bgColor = "rgb(0,0,0)";    // scene background
+let bgColor = "rgb(0,0,0)"; // scene background
+
+// mouse
+let rotationY = 0;
+let lastMouseX = 0;
+let rotating = false;
 
 // simulation params
-const w = 2;                   // size of each grid cell
-const gravity = 0.16;          // downward acceleration per frame
+const w = 2; // size of each grid cell
+const gravity = 0.16; // downward acceleration per frame
 
 const neighborOffsets = (() => {
   // precompute (dx,dz) pairs for diffusion
@@ -30,31 +33,31 @@ const neighborOffsets = (() => {
 // user input
 let xSlider, ySlider, zSlider; // sliders for (x,y,z) emitter pos
 let sendButton;
-let buttonPressed = false;     // is user drawing sand?
+let buttonPressed = false; // is user drawing sand?
 
 // timing (pause when no input)
 let lastEmitTime = 0;
-const pauseTimeout = 10000;    // ms until simulation pauses
+const pauseTimeout = 10000; // ms until simulation pauses
 
 // grid dims & storage
-let cols, rows, depths;        
-let grid, nextGrid;            // double-buffer arrays
+let cols, rows, depths;
+let grid, nextGrid; // double-buffer arrays
 
 // active particles list: {i,j,k,cell}
 let activeParticles = [];
 
 class Cell {
   constructor() {
-    this.reset();              // initialise default state
+    this.reset(); // initialise default state
   }
-  
+
   reset() {
     // empty cell state
     this.cellColor = bgColor;
     this.velocity = 0;
     this.active = false;
   }
-  
+
   copyTo(dest) {
     // copy this state into dest cell & activate
     dest.cellColor = this.cellColor;
@@ -80,6 +83,7 @@ function make3D(c, r, d) {
 
 function setup() {
   frameRate(60);
+  
   const canvasSize = 500;
   createCanvas(canvasSize, canvasSize, WEBGL);
 
@@ -89,7 +93,7 @@ function setup() {
   nextGrid = make3D(cols, rows, depths);
 
   // sliders for X, Y, Z
-  ["X","Y","Z"].forEach((axis, idx) => {
+  ["X", "Y", "Z"].forEach((axis, idx) => {
     createP(`${axis} (0 to ${canvasSize})`);
     const s = createSlider(0, canvasSize, 0);
     if (idx === 0) xSlider = s;
@@ -100,34 +104,33 @@ function setup() {
   sendButton = createButton("Draw Sand!");
   sendButton.mousePressed(() => {
     buttonPressed = true;
-    lastEmitTime = millis();    // reset timeout on press
+    lastEmitTime = millis(); // reset timeout on press
   });
   sendButton.mouseReleased(() => {
     buttonPressed = false;
     // reset sliders when released
-    [xSlider, ySlider, zSlider].forEach(s => s.value(0));
+    [xSlider, ySlider, zSlider].forEach((s) => s.value(0));
   });
 }
 
 function draw() {
   orbitControl();
+  
   background(bgColor);
-  translate(0, 0, -700);  // Move the entire scene 200 units away from the camera
-
+  translate(0, 0, -700); // Move the entire scene 200 units away from the camera
 
   // DRAW WIREFRAME BOX AROUND DRAWABLE AREA
   push();
-    noFill();
-    stroke(255);
-    strokeWeight(3);
-    box(cols*w, rows*w, depths*w);
+  noFill();
+  stroke(255);
+  strokeWeight(3);
+  box(cols * w, rows * w, depths * w);
   pop();
-  
-  
+
   // emit sand while button is held
   if (buttonPressed) {
     emitSand();
-    lastEmitTime = millis();    // keep sim active
+    lastEmitTime = millis(); // keep sim active
   }
 
   // render all active particles
@@ -135,12 +138,12 @@ function draw() {
     noStroke();
     fill(p.cell.cellColor);
     push();
-      translate(
-        (p.i - cols/2) * w,
-        (p.j - rows/2) * w,
-        (p.k - depths/2) * w
-      );
-      box(w);                    // < particle shape >
+    translate(
+      (p.i - cols / 2) * w,
+      (p.j - rows / 2) * w,
+      (p.k - depths / 2) * w
+    );
+    box(w); // < particle shape >
     pop();
   }
 
@@ -154,23 +157,26 @@ function draw() {
 
     // PHYSICS UPDATE
     for (let p of activeParticles) {
-      const {i, j, k, cell} = p;
+      const { i, j, k, cell } = p;
       const vel = cell.velocity + gravity;
-      const topJ = min(rows-1, floor(j + vel));
+      const topJ = min(rows - 1, floor(j + vel));
       let moved = false;
 
       // try to fall & spread randomly
       for (let y = topJ; y > j; y--) {
         const starter = floor(random() * neighborOffsets.length);
         for (let n = 0; n < neighborOffsets.length; n++) {
-          const [dx, dz] = neighborOffsets[(starter + n) % neighborOffsets.length];
-          const ni = i + dx, nk = k + dz;
+          const [dx, dz] = neighborOffsets[
+            (starter + n) % neighborOffsets.length
+          ];
+          const ni = i + dx,
+            nk = k + dz;
           if (ni >= 0 && ni < cols && nk >= 0 && nk < depths) {
             const target = nextGrid[ni][y][nk];
             if (!target.active) {
               cell.copyTo(target);
               target.velocity = vel;
-              newActives.push({i: ni, j: y, k: nk, cell: target});
+              newActives.push({ i: ni, j: y, k: nk, cell: target });
               moved = true;
               break;
             }
@@ -183,7 +189,7 @@ function draw() {
         // no fall possible: stay in place
         const tgt = nextGrid[i][j][k];
         cell.copyTo(tgt);
-        newActives.push({i, j, k, cell: tgt});
+        newActives.push({ i, j, k, cell: tgt });
       }
     }
 
@@ -203,38 +209,54 @@ function emitSand() {
   for (let di = -ext; di <= ext; di++) {
     for (let dj = -ext; dj <= ext; dj++) {
       for (let dk = -ext; dk <= ext; dk++) {
-        if (random() < 0.5) { // 50% chance on either side
-          const ni = ci + di, nj = cj + dj, nk = ck + dk;
+        if (random() < 0.5) {
+          // 50% chance on either side
+          const ni = ci + di,
+            nj = cj + dj,
+            nk = ck + dk;
           if (
-            ni >= 0 && ni < cols &&
-            nj >= 0 && nj < rows &&
-            nk >= 0 && nk < depths
+            ni >= 0 &&
+            ni < cols &&
+            nj >= 0 &&
+            nj < rows &&
+            nk >= 0 &&
+            nk < depths
           ) {
             const c = grid[ni][nj][nk];
             if (!c.active) {
               // activate new sand particle
               c.active = true;
-              
+
               // randomising colour
               function getRandomColorBetween(color1, color2) {
-              const random = Math.random();
-              return {
-        red: Math.floor(color1.red + (color2.red - color1.red) * random),
-        green: Math.floor(color1.green + (color2.green - color1.green) * random),
-        blue: Math.floor(color1.blue + (color2.blue - color1.blue) * random)
-      };
-    }
+                const random = Math.random();
+                return {
+                  red: Math.floor(
+                    color1.red + (color2.red - color1.red) * random
+                  ),
+                  green: Math.floor(
+                    color1.green + (color2.green - color1.green) * random
+                  ),
+                  blue: Math.floor(
+                    color1.blue + (color2.blue - color1.blue) * random
+                  ),
+                };
+              }
 
-    // Example usage
-    const color1 = { red: 210, green: 160, blue: 80 }; // dark brown
-    const color2 = { red: 240, green: 220, blue: 180 }; // light brown
-              
-      let randomColor = getRandomColorBetween(color1, color2);
-      // linearly interpolate between dark brown and light brown
+              // Example usage
+              const color1 = { red: 210, green: 160, blue: 80 }; // dark brown
+              const color2 = { red: 240, green: 220, blue: 180 }; // light brown
 
-              c.cellColor = color(randomColor.red, randomColor.green, randomColor.blue);
+              let randomColor = getRandomColorBetween(color1, color2);
+              // linearly interpolate between dark brown and light brown
+
+              c.cellColor = color(
+                randomColor.red,
+                randomColor.green,
+                randomColor.blue
+              );
               c.velocity = 1;
-              activeParticles.push({i: ni, j: nj, k: nk, cell: c});
+              activeParticles.push({ i: ni, j: nj, k: nk, cell: c });
             }
           }
         }
